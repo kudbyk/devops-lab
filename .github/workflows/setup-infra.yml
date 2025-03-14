@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push: 
     branches:
+      - feature/setup-infra
       - main
     paths:
       - ".github/workflows/setup-infra.yml"
@@ -11,32 +12,39 @@ on:
 jobs:
   setup_infra:
     runs-on: ubuntu-latest
+    env:
+      PROXMOX_API_TOKEN_ID: ${{ secrets.PROXMOX_API_TOKEN_ID }}
+      PROXMOX_API_TOKEN_SECRET: ${{ secrets.PROXMOX_API_TOKEN_SECRET }}
+      PROXMOX_HOST: ${{ secrets.PROXMOX_HOST }}
+      PROXMOX_PVE_USER: ${{ secrets.PROXMOX_PVE_USER }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install WireGuard
-        run: sudo apt update && sudo apt install -y wireguard
+      - name: Installing WireGuard
+        run: |
+          sudo apt update
+          sudo apt install -y wireguard
 
       - name: Configure WireGuard
         run: |
-          echo "[Interface]
+          cat <<EOF | sudo tee /etc/wireguard/wg0.conf > /dev/null
+          [Interface]
           PrivateKey = ${{ secrets.WG_GA_PRIV_KEY }}
           Address = ${{ secrets.WG_GA_IP }}
-          DNS = 8.8.8.8
 
           [Peer]
           PublicKey = ${{ secrets.WG_OPNSENSE_PUB_KEY }}
           Endpoint = ${{ secrets.WG_OPNSENSE_ENDPOINT }}
           AllowedIPs = ${{ secrets.WG_GA_ALLOWED_IPS }}
           PersistentKeepalive = 25
-          " > wg0.conf
-          sudo mv wg0.conf /etc/wireguard/wg0.conf
+          EOF
           sudo chmod 600 /etc/wireguard/wg0.conf
 
       - name: Start WireGuard
-        run: sudo wg-quick up wg0
+        run: |
+          sudo systemctl start wg-quick@wg0
 
       - name: Check VPN Connection
         run: |
@@ -44,7 +52,27 @@ jobs:
           ip a show wg0 
           ping -c 4 ${{ secrets.OPNSENSE_LOCAL_IP }}  # Ping OPNsense
           ping -c 4 ${{ secrets.PROXMOX_LOCAL_IP }} # Ping Proxmox
-          sudo wg show
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with: 
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Generate Terraform Backend Config
+        run: |
+          cat <<EOF > terraform/backend.hcl
+          hostname = "${{ vars.TF_CLOUD_HOSTNAME }}"
+          organization = "${{ vars.TF_CLOUD_ORGANIZATION }}"
+          workspaces {
+            name = "${{ vars.TF_CLOUD_WORKSPACE}}"
+          }
+          EOF
+
+      - name: Terraform Init
+        working-directory: terraform/
+        run: |
+          terraform init -backend-config=backend.hcl
 
       - name: Stop WireGuard
-        run: sudo wg-quick down wg0
+        if: success()
+        run: sudo systemctl stop wg-quick@wg0
