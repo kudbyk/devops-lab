@@ -1,0 +1,9 @@
+variable "pm_api_token_id" {}
+variable "pm_api_token_secret" {}
+variable "pm_ip" {}
+variable "pm_port" {}
+variable "pm_user" {}
+variable "pm_storage" {}
+variable "runner_ip" {}
+variable "ssh_pub_key" {}
+variable "ubuntu_lxc_template" {}
