@@ -1,0 +1,96 @@
+name: "Setup Self-Hosted Runner"
+
+on:
+  workflow_dispatch:
+  push: 
+    branches:
+      - feature/self-hosted-runner
+      - main
+    paths:
+      - ".github/workflows/setup-runner.yml"
+      - "infra/setup-runner/**"
+
+jobs:
+  setup_runner:
+    runs-on: ubuntu-latest
+    env:
+      TF_VAR_pm_api_token_id: ${{ secrets.PM_API_TOKEN_ID }}
+      TF_VAR_pm_api_token_secret: ${{ secrets.PM_API_TOKEN_SECRET }}
+      TF_VAR_pm_ip: ${{ secrets.PM_IP }}
+      TF_VAR_pm_port: ${{ secrets.PM_PORT }}
+      TF_VAR_pm_user: ${{ secrets.PM_USER }}
+      TF_VAR_runner_ip: ${{ secrets.RUNNER_IP }}
+      TF_VAR_os_ip: ${{ secrets.OS_IP }}
+      TF_VAR_ssh_pub_key: ${{ secrets.SSH_PUB_KEY }}
+      TF_VAR_ubuntu_lxc_template: ${{ vars.UBUNTU_LXC_TEMPLATE }}
+      TF_VAR_pm_storage: ${{ vars.PM_STORAGE }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Installing WireGuard
+        run: |
+          sudo apt update
+          sudo apt install -y wireguard
+
+      - name: Configure WireGuard
+        run: |
+          cat <<EOF | sudo tee /etc/wireguard/wg0.conf > /dev/null
+          [Interface]
+          PrivateKey = ${{ secrets.WG_GA_PRIV_KEY }}
+          Address = ${{ secrets.WG_GA_IP }}
+
+          [Peer]
+          PublicKey = ${{ secrets.WG_OS_PUB_KEY }}
+          Endpoint = ${{ secrets.IP }}:${{ secrets.WG_PORT }}
+          AllowedIPs = ${{ secrets.SUBNETS }}
+          PersistentKeepalive = 25
+          EOF
+          sudo chmod 600 /etc/wireguard/wg0.conf
+
+      - name: Start WireGuard
+        run: |
+          sudo systemctl start wg-quick@wg0
+
+      - name: Check VPN Connection
+        run: |
+          echo "Checking VPN connection..."
+          ip a show wg0 
+          ping -c 4 ${{ secrets.OS_IP }}  # Ping OPNsense
+          ping -c 4 ${{ secrets.PM_IP }} # Ping Proxmox
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with: 
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Generate Terraform Backend Config
+        working-directory: infra/setup-runner/terraform
+        run: |
+          cat <<EOF > backend.hcl
+          hostname = "${{ vars.TF_CLOUD_HOSTNAME }}"
+          organization = "${{ vars.TF_CLOUD_ORGANIZATION }}"
+          workspaces {
+            name = "${{ vars.TF_CLOUD_WORKSPACE}}"
+          }
+          EOF
+
+      - name: Terraform Init
+        working-directory: infra/setup-runner/terraform
+        run: |
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        working-directory: infra/setup-runner/terraform
+        run: |
+          terraform plan
+
+      - name: Terraform Apply
+        working-directory: infra/setup-runner/terraform
+        run: |
+          terraform apply -auto-approve
+
+      - name: Stop WireGuard
+        if: success()
+        run: sudo systemctl stop wg-quick@wg0
