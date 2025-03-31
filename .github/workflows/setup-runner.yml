@@ -16,11 +16,11 @@ jobs:
     env:
       TF_VAR_pm_api_token_id: ${{ secrets.PM_API_TOKEN_ID }}
       TF_VAR_pm_api_token_secret: ${{ secrets.PM_API_TOKEN_SECRET }}
-      TF_VAR_pm_ip: ${{ secrets.PM_IP }}
-      TF_VAR_pm_port: ${{ secrets.PM_PORT }}
+      TF_VAR_pm_ip: ${{ vars.PM_IP }}
+      TF_VAR_pm_port: ${{ vars.PM_PORT }}
       TF_VAR_pm_user: ${{ secrets.PM_USER }}
-      TF_VAR_runner_ip: ${{ secrets.RUNNER_IP }}
-      TF_VAR_os_ip: ${{ secrets.OS_IP }}
+      TF_VAR_runner_ip: ${{ vars.RUNNER_IP }}
+      TF_VAR_os_ip: ${{ vars.OS_IP }}
       TF_VAR_ssh_pub_key: ${{ secrets.SSH_PUB_KEY }}
       TF_VAR_ubuntu_lxc_template: ${{ vars.UBUNTU_LXC_TEMPLATE }}
       TF_VAR_pm_storage: ${{ vars.PM_STORAGE }}
@@ -39,12 +39,12 @@ jobs:
           cat <<EOF | sudo tee /etc/wireguard/wg0.conf > /dev/null
           [Interface]
           PrivateKey = ${{ secrets.WG_GA_PRIV_KEY }}
-          Address = ${{ secrets.WG_GA_IP }}
+          Address = ${{ vars.WG_GA_IP }}/32
 
           [Peer]
           PublicKey = ${{ secrets.WG_OS_PUB_KEY }}
           Endpoint = ${{ secrets.IP }}:${{ secrets.WG_PORT }}
-          AllowedIPs = ${{ secrets.SUBNETS }}
+          AllowedIPs = ${{ vars.SUBNETS }}
           PersistentKeepalive = 25
           EOF
           sudo chmod 600 /etc/wireguard/wg0.conf
@@ -57,8 +57,8 @@ jobs:
         run: |
           echo "Checking VPN connection..."
           ip a show wg0 
-          ping -c 4 ${{ secrets.OS_IP }}  # Ping OPNsense
-          ping -c 4 ${{ secrets.PM_IP }} # Ping Proxmox
+          ping -c 4 ${{ vars.OS_IP }}  # Ping OPNsense
+          ping -c 4 ${{ vars.PM_IP }} # Ping Proxmox
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
